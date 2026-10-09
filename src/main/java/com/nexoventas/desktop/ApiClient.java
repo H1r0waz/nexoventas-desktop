@@ -20,7 +20,7 @@ public final class ApiClient {
 
     public void login(String username, String password) throws IOException, InterruptedException {
         String payload = json.writeValueAsString(new LoginRequest(username, password));
-        HttpResponse<String> response = send(HttpRequest.newBuilder(uri("/api/v1/auth/login"))
+        HttpResponse<String> response = send(HttpRequest.newBuilder(uri("/api/v1/auth/login")).timeout(Duration.ofSeconds(30))
             .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(payload)).build());
         if (response.statusCode() != 200) throw new IOException("No se pudo iniciar sesión (HTTP " + response.statusCode() + ")");
         accessToken = json.readValue(response.body(), LoginResponse.class).accessToken();
@@ -40,7 +40,7 @@ public final class ApiClient {
         return json.readValue(response.body(), new TypeReference<>() {});
     }
 
-    private HttpRequest.Builder authenticated(String path) { return HttpRequest.newBuilder(uri(path)).header("Authorization", "Bearer " + accessToken); }
+    private HttpRequest.Builder authenticated(String path) { return HttpRequest.newBuilder(uri(path)).timeout(Duration.ofSeconds(30)).header("Authorization", "Bearer " + accessToken); }
     private HttpResponse<String> send(HttpRequest request) throws IOException, InterruptedException { return http.send(request, HttpResponse.BodyHandlers.ofString()); }
     private URI uri(String path) { return URI.create(baseUrl + path); }
     private void requireToken() { if (accessToken == null) throw new IllegalStateException("Iniciá sesión primero"); }
