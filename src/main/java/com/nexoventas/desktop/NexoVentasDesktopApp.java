@@ -53,7 +53,11 @@ public class NexoVentasDesktopApp extends Application {
         login.setDisable(true); login.setText("Conectando...");
         Task<Void> task = new Task<>() { @Override protected Void call() throws Exception { api.login(username, password); return null; } };
         task.setOnSucceeded(e -> ((Stage) login.getScene().getWindow()).getScene().setRoot(dashboard()));
-        task.setOnFailed(e -> { login.setDisable(false); login.setText("Ingresar al panel"); showError("No se pudo iniciar sesión. Verificá las credenciales o esperá unos minutos si Render está iniciando."); });
+        task.setOnFailed(e -> {
+            login.setDisable(false); login.setText("Ingresar al panel");
+            String reason = task.getException() == null ? "Error desconocido" : task.getException().getMessage();
+            showError("No se pudo iniciar sesión.\n\n" + reason + "\n\nVerificá las credenciales o esperá unos minutos si Render está iniciando.");
+        });
         new Thread(task, "nexoventas-login").start();
     }
 
