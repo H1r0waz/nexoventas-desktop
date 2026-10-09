@@ -11,6 +11,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 public class NexoVentasDesktopApp extends Application {
@@ -18,6 +20,7 @@ public class NexoVentasDesktopApp extends Application {
     private final ApiClient api = new ApiClient(apiUrl);
     private final Label status = new Label("Conectate para consultar la operación comercial.");
     private final TableView<ApiClient.Product> table = new TableView<>();
+    private final TableView<ApiClient.Sale> salesTable = new TableView<>();
     private final javafx.collections.ObservableList<ApiClient.Customer> customers = FXCollections.observableArrayList();
     private final Label productCount = metric("—", "Productos registrados");
     private final Label lowStockCount = metric("—", "Alertas de stock");
@@ -66,7 +69,7 @@ public class NexoVentasDesktopApp extends Application {
 
     private Parent dashboard() {
         Label brand = new Label("NEXOVENTAS"); brand.getStyleClass().add("brand");
-        Button refresh = new Button("Actualizar datos"); refresh.getStyleClass().add("secondary-button"); refresh.setOnAction(e -> loadProducts(refresh));
+        Button refresh = new Button("Actualizar datos"); refresh.getStyleClass().add("secondary-button"); refresh.setOnAction(e -> refreshDashboard(refresh));
         Button newProduct = new Button("+ Producto"); newProduct.getStyleClass().add("primary-compact"); newProduct.setOnAction(e -> openProductDialog());
         Button newCustomer = new Button("+ Cliente"); newCustomer.getStyleClass().add("secondary-button"); newCustomer.setOnAction(e -> openCustomerDialog());
         Button newSale = new Button("+ Venta"); newSale.getStyleClass().add("secondary-button"); newSale.setOnAction(e -> openSaleDialog());
@@ -74,11 +77,14 @@ public class NexoVentasDesktopApp extends Application {
         HBox identity = new HBox(10, BrandAssets.logoMark(32), brand, desktop); identity.setAlignment(Pos.CENTER_LEFT);
         HBox actions = new HBox(10, newProduct, newCustomer, newSale, refresh); actions.setAlignment(Pos.CENTER_RIGHT);
         HBox top = new HBox(identity, new Region(), actions); HBox.setHgrow(top.getChildren().get(1), Priority.ALWAYS); top.setAlignment(Pos.CENTER_LEFT); top.getStyleClass().add("topbar");
-        configureTable();
+        configureTable(); configureSalesTable();
         HBox metrics = new HBox(18, productCount, lowStockCount, customerCount, salesCount); metrics.getStyleClass().add("metrics");
-        VBox content = new VBox(22, heading("Resumen operativo", "Productos e inventario sincronizados con la API."), metrics, status, table); content.getStyleClass().add("content"); VBox.setVgrow(table, Priority.ALWAYS);
+        Tab productsTab = new Tab("Inventario", table); productsTab.setClosable(false);
+        Tab salesTab = new Tab("Ventas", salesTable); salesTab.setClosable(false);
+        TabPane dataTabs = new TabPane(productsTab, salesTab); dataTabs.getStyleClass().add("data-tabs");
+        VBox content = new VBox(22, heading("Resumen operativo", "Inventario, clientes y ventas sincronizados con la API."), metrics, status, dataTabs); content.getStyleClass().add("content"); VBox.setVgrow(dataTabs, Priority.ALWAYS);
         BorderPane root = new BorderPane(content); root.setTop(top); root.getStyleClass().add("dashboard");
-        Platform.runLater(() -> { loadProducts(refresh); loadCustomers(); loadSalesCount(); }); return root;
+        Platform.runLater(() -> refreshDashboard(refresh)); return root;
     }
 
     private void configureTable() {
@@ -89,6 +95,14 @@ public class NexoVentasDesktopApp extends Application {
         TableColumn<ApiClient.Product, String> price = new TableColumn<>("Precio"); price.setCellValueFactory(p -> new SimpleStringProperty("$ " + p.getValue().price())); price.setPrefWidth(150);
         table.getColumns().addAll(stock, minimum, price); table.setPlaceholder(new Label("No hay productos para mostrar."));
     }
+    private void configureSalesTable() {
+        if (!salesTable.getColumns().isEmpty()) return;
+        TableColumn<ApiClient.Sale, String> date = new TableColumn<>("Fecha"); date.setCellValueFactory(s -> new SimpleStringProperty(formatDate(s.getValue().createdAt()))); date.setPrefWidth(170);
+        TableColumn<ApiClient.Sale, String> customer = new TableColumn<>("Cliente"); customer.setCellValueFactory(s -> new SimpleStringProperty(s.getValue().customer() == null ? "—" : s.getValue().customer().name())); customer.setPrefWidth(245);
+        TableColumn<ApiClient.Sale, String> items = new TableColumn<>("Detalle"); items.setCellValueFactory(s -> new SimpleStringProperty(saleDetail(s.getValue()))); items.setPrefWidth(430);
+        TableColumn<ApiClient.Sale, String> total = new TableColumn<>("Total"); total.setCellValueFactory(s -> new SimpleStringProperty("$ " + s.getValue().total())); total.setPrefWidth(165);
+        salesTable.getColumns().addAll(date, customer, items, total); salesTable.setPlaceholder(new Label("Todavía no hay ventas registradas."));
+    }
     private TableColumn<ApiClient.Product, String> column(String title, String property, int width) {
         TableColumn<ApiClient.Product, String> column = new TableColumn<>(title);
         column.setCellValueFactory(product -> new SimpleStringProperty(switch (property) {
@@ -96,20 +110,25 @@ public class NexoVentasDesktopApp extends Application {
         }));
         column.setPrefWidth(width); return column;
     }
+    private void refreshDashboard(Button refresh) {
+        if (refresh != null) refresh.setDisable(true);
+        status.setText("Actualizando datos desde la API...");
+        loadProducts(refresh); loadCustomers(); loadSales();
+    }
     private void loadProducts(Button refresh) {
-        refresh.setDisable(true); status.setText("Actualizando datos desde la API...");
         Task<List<ApiClient.Product>> task = new Task<>() { @Override protected List<ApiClient.Product> call() throws Exception { return api.products(); } };
-        task.setOnSucceeded(e -> { List<ApiClient.Product> products = task.getValue(); table.setItems(FXCollections.observableArrayList(products)); productCount.setText(products.size() + "\nProductos registrados"); refresh.setDisable(false); status.setText("●  Datos sincronizados correctamente."); status.getStyleClass().setAll("status-success"); loadLowStock(); });
-        task.setOnFailed(e -> { refresh.setDisable(false); status.setText("●  No se pudieron actualizar los datos. Revisá la conexión."); status.getStyleClass().setAll("status-error"); }); new Thread(task, "nexoventas-products").start();
+        task.setOnSucceeded(e -> { List<ApiClient.Product> products = task.getValue(); table.setItems(FXCollections.observableArrayList(products)); productCount.setText(products.size() + "\nProductos registrados"); if (refresh != null) refresh.setDisable(false); status.setText("●  Datos sincronizados correctamente."); status.getStyleClass().setAll("status-success"); loadLowStock(); });
+        task.setOnFailed(e -> { if (refresh != null) refresh.setDisable(false); status.setText("●  No se pudieron actualizar los datos. Revisá la conexión."); status.getStyleClass().setAll("status-error"); }); new Thread(task, "nexoventas-products").start();
     }
     private void loadCustomers() {
         Task<List<ApiClient.Customer>> task = new Task<>() { @Override protected List<ApiClient.Customer> call() throws Exception { return api.customers(); } };
         task.setOnSucceeded(e -> { customers.setAll(task.getValue()); customerCount.setText(customers.size() + "\nClientes registrados"); });
         new Thread(task, "nexoventas-customers").start();
     }
-    private void loadSalesCount() {
-        Task<Integer> task = new Task<>() { @Override protected Integer call() throws Exception { return api.salesCount(); } };
-        task.setOnSucceeded(e -> salesCount.setText(task.getValue() + "\nVentas registradas")); new Thread(task, "nexoventas-sales").start();
+    private void loadSales() {
+        Task<List<ApiClient.Sale>> task = new Task<>() { @Override protected List<ApiClient.Sale> call() throws Exception { return api.sales(); } };
+        task.setOnSucceeded(e -> { List<ApiClient.Sale> sales = task.getValue(); salesTable.setItems(FXCollections.observableArrayList(sales)); salesCount.setText(sales.size() + "\nVentas registradas"); });
+        new Thread(task, "nexoventas-sales").start();
     }
     private void loadLowStock() { Task<List<ApiClient.Product>> task = new Task<>() { @Override protected List<ApiClient.Product> call() throws Exception { return api.lowStock(); } }; task.setOnSucceeded(e -> lowStockCount.setText(task.getValue().size() + "\nAlertas de stock")); new Thread(task, "nexoventas-low-stock").start(); }
 
@@ -152,11 +171,19 @@ public class NexoVentasDesktopApp extends Application {
     private GridPane formGrid(String[] labels, Control... controls) { GridPane grid = new GridPane(); grid.setHgap(12); grid.setVgap(12); grid.setPadding(new Insets(10, 0, 0, 0)); for (int i = 0; i < labels.length; i++) { Label label = new Label(labels[i]); label.getStyleClass().add("form-label"); grid.add(label, 0, i); grid.add(controls[i], 1, i); GridPane.setHgrow(controls[i], Priority.ALWAYS); } return grid; }
     private void runMutation(String success, ApiOperation operation) {
         Task<Void> task = new Task<>() { @Override protected Void call() throws Exception { operation.run(); return null; } };
-        task.setOnSucceeded(e -> { status.setText("●  " + success); status.getStyleClass().setAll("status-success"); loadProducts(new Button()); loadCustomers(); loadSalesCount(); });
+        task.setOnSucceeded(e -> { status.setText("●  " + success); status.getStyleClass().setAll("status-success"); refreshDashboard(null); });
         task.setOnFailed(e -> showError(task.getException() == null ? "No se pudo completar la operación." : task.getException().getMessage())); new Thread(task, "nexoventas-mutation").start();
     }
     @FunctionalInterface private interface ApiOperation { void run() throws Exception; }
     private Label metric(String value, String caption) { Label label = new Label(value + "\n" + caption); label.getStyleClass().add("metric"); return label; }
+    private String saleDetail(ApiClient.Sale sale) {
+        if (sale.items() == null || sale.items().isEmpty()) return "Sin artículos";
+        return sale.items().stream().map(item -> item.quantity() + " × " + (item.product() == null ? "Producto" : item.product().name())).reduce((left, right) -> left + " · " + right).orElse("Sin artículos");
+    }
+    private String formatDate(String value) {
+        try { return OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")); }
+        catch (Exception ignored) { return value == null ? "—" : value; }
+    }
     private VBox heading(String title, String subtitle) { Label h = new Label(title); h.getStyleClass().add("page-title"); Label s = new Label(subtitle); s.getStyleClass().add("subtitle"); return new VBox(6, h, s); }
     private void showError(String message) { new Alert(Alert.AlertType.ERROR, message, ButtonType.OK).showAndWait(); }
     public static void main(String[] args) { launch(args); }

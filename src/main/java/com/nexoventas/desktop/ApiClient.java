@@ -48,9 +48,13 @@ public final class ApiClient {
     }
 
     public int salesCount() throws IOException, InterruptedException {
+        return sales().size();
+    }
+
+    public List<Sale> sales() throws IOException, InterruptedException {
         HttpResponse<String> response = send(authenticated("/api/v1/sales").GET().build());
         if (response.statusCode() != 200) throw new IOException("No se pudieron cargar las ventas (HTTP " + response.statusCode() + ")");
-        return json.readTree(response.body()).size();
+        return json.readValue(response.body(), new TypeReference<>() {});
     }
 
     public void createProduct(String sku, String name, String category, BigDecimal price, int stock, int minimumStock) throws IOException, InterruptedException {
@@ -88,4 +92,6 @@ public final class ApiClient {
     public record Customer(String id, String name, String taxId, String email, String phone) {
         @Override public String toString() { return name; }
     }
+    public record Sale(String id, Customer customer, String createdAt, BigDecimal total, List<SaleItem> items) {}
+    public record SaleItem(String id, Product product, int quantity, BigDecimal unitPrice, BigDecimal subtotal) {}
 }
