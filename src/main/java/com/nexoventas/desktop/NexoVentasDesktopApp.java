@@ -9,8 +9,8 @@ import javafx.geometry.*;
 import javafx.scene.*;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
 import javafx.stage.Stage;
+import java.math.BigDecimal;
 import java.util.List;
 
 public class NexoVentasDesktopApp extends Application {
@@ -18,8 +18,11 @@ public class NexoVentasDesktopApp extends Application {
     private final ApiClient api = new ApiClient(apiUrl);
     private final Label status = new Label("Conectate para consultar la operación comercial.");
     private final TableView<ApiClient.Product> table = new TableView<>();
+    private final javafx.collections.ObservableList<ApiClient.Customer> customers = FXCollections.observableArrayList();
     private final Label productCount = metric("—", "Productos registrados");
     private final Label lowStockCount = metric("—", "Alertas de stock");
+    private final Label customerCount = metric("—", "Clientes registrados");
+    private final Label salesCount = metric("—", "Ventas registradas");
 
     @Override public void start(Stage stage) {
         stage.setTitle("NexoVentas Desktop · Gestión comercial");
@@ -64,14 +67,18 @@ public class NexoVentasDesktopApp extends Application {
     private Parent dashboard() {
         Label brand = new Label("NEXOVENTAS"); brand.getStyleClass().add("brand");
         Button refresh = new Button("Actualizar datos"); refresh.getStyleClass().add("secondary-button"); refresh.setOnAction(e -> loadProducts(refresh));
+        Button newProduct = new Button("+ Producto"); newProduct.getStyleClass().add("primary-compact"); newProduct.setOnAction(e -> openProductDialog());
+        Button newCustomer = new Button("+ Cliente"); newCustomer.getStyleClass().add("secondary-button"); newCustomer.setOnAction(e -> openCustomerDialog());
+        Button newSale = new Button("+ Venta"); newSale.getStyleClass().add("secondary-button"); newSale.setOnAction(e -> openSaleDialog());
         Label desktop = new Label("DESKTOP"); desktop.getStyleClass().add("desktop-pill");
         HBox identity = new HBox(10, BrandAssets.logoMark(32), brand, desktop); identity.setAlignment(Pos.CENTER_LEFT);
-        HBox top = new HBox(identity, new Region(), refresh); HBox.setHgrow(top.getChildren().get(1), Priority.ALWAYS); top.setAlignment(Pos.CENTER_LEFT); top.getStyleClass().add("topbar");
+        HBox actions = new HBox(10, newProduct, newCustomer, newSale, refresh); actions.setAlignment(Pos.CENTER_RIGHT);
+        HBox top = new HBox(identity, new Region(), actions); HBox.setHgrow(top.getChildren().get(1), Priority.ALWAYS); top.setAlignment(Pos.CENTER_LEFT); top.getStyleClass().add("topbar");
         configureTable();
-        HBox metrics = new HBox(18, productCount, lowStockCount); metrics.getStyleClass().add("metrics");
+        HBox metrics = new HBox(18, productCount, lowStockCount, customerCount, salesCount); metrics.getStyleClass().add("metrics");
         VBox content = new VBox(22, heading("Resumen operativo", "Productos e inventario sincronizados con la API."), metrics, status, table); content.getStyleClass().add("content"); VBox.setVgrow(table, Priority.ALWAYS);
         BorderPane root = new BorderPane(content); root.setTop(top); root.getStyleClass().add("dashboard");
-        Platform.runLater(() -> loadProducts(refresh)); return root;
+        Platform.runLater(() -> { loadProducts(refresh); loadCustomers(); loadSalesCount(); }); return root;
     }
 
     private void configureTable() {
@@ -95,7 +102,60 @@ public class NexoVentasDesktopApp extends Application {
         task.setOnSucceeded(e -> { List<ApiClient.Product> products = task.getValue(); table.setItems(FXCollections.observableArrayList(products)); productCount.setText(products.size() + "\nProductos registrados"); refresh.setDisable(false); status.setText("●  Datos sincronizados correctamente."); status.getStyleClass().setAll("status-success"); loadLowStock(); });
         task.setOnFailed(e -> { refresh.setDisable(false); status.setText("●  No se pudieron actualizar los datos. Revisá la conexión."); status.getStyleClass().setAll("status-error"); }); new Thread(task, "nexoventas-products").start();
     }
+    private void loadCustomers() {
+        Task<List<ApiClient.Customer>> task = new Task<>() { @Override protected List<ApiClient.Customer> call() throws Exception { return api.customers(); } };
+        task.setOnSucceeded(e -> { customers.setAll(task.getValue()); customerCount.setText(customers.size() + "\nClientes registrados"); });
+        new Thread(task, "nexoventas-customers").start();
+    }
+    private void loadSalesCount() {
+        Task<Integer> task = new Task<>() { @Override protected Integer call() throws Exception { return api.salesCount(); } };
+        task.setOnSucceeded(e -> salesCount.setText(task.getValue() + "\nVentas registradas")); new Thread(task, "nexoventas-sales").start();
+    }
     private void loadLowStock() { Task<List<ApiClient.Product>> task = new Task<>() { @Override protected List<ApiClient.Product> call() throws Exception { return api.lowStock(); } }; task.setOnSucceeded(e -> lowStockCount.setText(task.getValue().size() + "\nAlertas de stock")); new Thread(task, "nexoventas-low-stock").start(); }
+
+    private void openProductDialog() {
+        Dialog<ButtonType> dialog = formDialog("Nuevo producto", "Registrá un producto para actualizar el catálogo.");
+        TextField sku = field("SKU, ej. TEC-001"), name = field("Nombre del producto"), category = field("Categoría");
+        TextField price = field("Precio, ej. 25000"), stock = field("Stock inicial"), minimum = field("Stock mínimo");
+        dialog.getDialogPane().setContent(formGrid(new String[] {"SKU", "Nombre", "Categoría", "Precio", "Stock", "Mínimo"}, sku, name, category, price, stock, minimum));
+        if (dialog.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+        try { runMutation("Producto registrado correctamente.", () -> api.createProduct(sku.getText().trim(), name.getText().trim(), category.getText().trim(), new BigDecimal(price.getText().trim()), Integer.parseInt(stock.getText().trim()), Integer.parseInt(minimum.getText().trim()))); }
+        catch (NumberFormatException e) { showError("Precio, stock y mínimo deben ser números válidos."); }
+    }
+
+    private void openCustomerDialog() {
+        Dialog<ButtonType> dialog = formDialog("Nuevo cliente", "Registrá un cliente para poder crear ventas.");
+        TextField name = field("Nombre o razón social"), taxId = field("CUIT/DNI (opcional)"), email = field("Email (opcional)"), phone = field("Teléfono (opcional)");
+        dialog.getDialogPane().setContent(formGrid(new String[] {"Nombre", "CUIT/DNI", "Email", "Teléfono"}, name, taxId, email, phone));
+        if (dialog.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+        runMutation("Cliente registrado correctamente.", () -> api.createCustomer(name.getText().trim(), taxId.getText().trim(), email.getText().trim(), phone.getText().trim()));
+    }
+
+    private void openSaleDialog() {
+        if (customers.isEmpty()) { showError("Primero registrá al menos un cliente."); return; }
+        if (table.getItems().isEmpty()) { showError("Primero registrá al menos un producto."); return; }
+        Dialog<ButtonType> dialog = formDialog("Registrar venta", "La venta descuenta el stock automáticamente.");
+        ComboBox<ApiClient.Customer> customer = new ComboBox<>(customers); customer.setMaxWidth(Double.MAX_VALUE); customer.setPromptText("Seleccioná un cliente");
+        ComboBox<ApiClient.Product> product = new ComboBox<>(table.getItems()); product.setMaxWidth(Double.MAX_VALUE); product.setPromptText("Seleccioná un producto");
+        TextField quantity = field("Cantidad");
+        dialog.getDialogPane().setContent(formGrid(new String[] {"Cliente", "Producto", "Cantidad"}, customer, product, quantity));
+        if (dialog.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
+        if (customer.getValue() == null || product.getValue() == null) { showError("Seleccioná un cliente y un producto."); return; }
+        try { runMutation("Venta registrada. El inventario fue actualizado.", () -> api.createSale(customer.getValue().id(), product.getValue().id(), Integer.parseInt(quantity.getText().trim()))); }
+        catch (NumberFormatException e) { showError("La cantidad debe ser un número entero válido."); }
+    }
+
+    private Dialog<ButtonType> formDialog(String title, String header) {
+        Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(title); dialog.setHeaderText(header); dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK); dialog.getDialogPane().getStylesheets().add(getClass().getResource("/com/nexoventas/desktop/styles.css").toExternalForm()); return dialog;
+    }
+    private TextField field(String prompt) { TextField input = new TextField(); input.setPromptText(prompt); return input; }
+    private GridPane formGrid(String[] labels, Control... controls) { GridPane grid = new GridPane(); grid.setHgap(12); grid.setVgap(12); grid.setPadding(new Insets(10, 0, 0, 0)); for (int i = 0; i < labels.length; i++) { Label label = new Label(labels[i]); label.getStyleClass().add("form-label"); grid.add(label, 0, i); grid.add(controls[i], 1, i); GridPane.setHgrow(controls[i], Priority.ALWAYS); } return grid; }
+    private void runMutation(String success, ApiOperation operation) {
+        Task<Void> task = new Task<>() { @Override protected Void call() throws Exception { operation.run(); return null; } };
+        task.setOnSucceeded(e -> { status.setText("●  " + success); status.getStyleClass().setAll("status-success"); loadProducts(new Button()); loadCustomers(); loadSalesCount(); });
+        task.setOnFailed(e -> showError(task.getException() == null ? "No se pudo completar la operación." : task.getException().getMessage())); new Thread(task, "nexoventas-mutation").start();
+    }
+    @FunctionalInterface private interface ApiOperation { void run() throws Exception; }
     private Label metric(String value, String caption) { Label label = new Label(value + "\n" + caption); label.getStyleClass().add("metric"); return label; }
     private VBox heading(String title, String subtitle) { Label h = new Label(title); h.getStyleClass().add("page-title"); Label s = new Label(subtitle); s.getStyleClass().add("subtitle"); return new VBox(6, h, s); }
     private void showError(String message) { new Alert(Alert.AlertType.ERROR, message, ButtonType.OK).showAndWait(); }

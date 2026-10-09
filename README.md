@@ -7,6 +7,8 @@ Cliente de escritorio de gestión comercial construido con JavaFX. Consume la AP
 - Inicio de sesión contra la API con JWT.
 - Consulta de productos en tiempo real.
 - Indicadores de productos registrados y alertas de stock mínimo.
+- Alta de productos y clientes desde la aplicación.
+- Registro de ventas con descuento automático de inventario.
 - Actualización manual de datos y manejo de errores de red.
 - URL de API configurable sin modificar el código.
 
