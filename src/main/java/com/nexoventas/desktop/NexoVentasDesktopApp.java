@@ -9,6 +9,7 @@ import javafx.geometry.*;
 import javafx.scene.*;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import java.util.List;
 
@@ -21,7 +22,9 @@ public class NexoVentasDesktopApp extends Application {
     private final Label lowStockCount = metric("—", "Alertas de stock");
 
     @Override public void start(Stage stage) {
-        stage.setTitle("NexoVentas Desktop");
+        stage.setTitle("NexoVentas Desktop · Gestión comercial");
+        stage.getIcons().add(BrandAssets.windowIcon());
+        stage.setMinWidth(980); stage.setMinHeight(650);
         Scene scene = new Scene(loginView(), 1180, 720);
         scene.getStylesheets().add(getClass().getResource("/com/nexoventas/desktop/styles.css").toExternalForm());
         stage.setScene(scene); stage.show();
@@ -31,12 +34,14 @@ public class NexoVentasDesktopApp extends Application {
         Label brand = new Label("NEXOVENTAS"); brand.getStyleClass().add("brand");
         Label title = new Label("Gestión comercial\nen tiempo real."); title.getStyleClass().add("login-title");
         Label subtitle = new Label("Cliente de escritorio Java que consume la API REST desplegada con Spring Boot, Render y Neon."); subtitle.getStyleClass().add("subtitle"); subtitle.setWrapText(true);
-        VBox intro = new VBox(22, brand, title, subtitle); intro.getStyleClass().add("intro");
+        Label eyebrow = new Label("CLIENTE DE ESCRITORIO"); eyebrow.getStyleClass().add("eyebrow");
+        VBox intro = new VBox(18, BrandAssets.logoMark(74), eyebrow, brand, title, subtitle); intro.getStyleClass().add("intro");
         TextField user = new TextField(); user.setPromptText("Usuario");
         PasswordField password = new PasswordField(); password.setPromptText("Contraseña");
         Button login = new Button("Ingresar al panel"); login.setMaxWidth(Double.MAX_VALUE); login.getStyleClass().add("primary-button");
         Label hint = new Label("API: " + apiUrl); hint.getStyleClass().add("hint"); hint.setWrapText(true);
-        VBox form = new VBox(16, heading("Iniciar sesión", "Usá las credenciales configuradas en Render."), user, password, login, hint); form.getStyleClass().add("login-card");
+        Label security = new Label("●  Conexión segura mediante JWT"); security.getStyleClass().add("security-note");
+        VBox form = new VBox(16, heading("Iniciar sesión", "Accedé a tu operación comercial."), user, password, login, security, hint); form.getStyleClass().add("login-card");
         login.setOnAction(e -> authenticate(user.getText(), password.getText(), login));
         password.setOnAction(e -> login.fire());
         HBox root = new HBox(intro, form); root.setAlignment(Pos.CENTER); root.setSpacing(80); root.getStyleClass().add("login-root");
@@ -55,7 +60,9 @@ public class NexoVentasDesktopApp extends Application {
     private Parent dashboard() {
         Label brand = new Label("NEXOVENTAS"); brand.getStyleClass().add("brand");
         Button refresh = new Button("Actualizar datos"); refresh.getStyleClass().add("secondary-button"); refresh.setOnAction(e -> loadProducts(refresh));
-        HBox top = new HBox(brand, new Region(), refresh); HBox.setHgrow(top.getChildren().get(1), Priority.ALWAYS); top.setAlignment(Pos.CENTER_LEFT); top.getStyleClass().add("topbar");
+        Label desktop = new Label("DESKTOP"); desktop.getStyleClass().add("desktop-pill");
+        HBox identity = new HBox(10, BrandAssets.logoMark(32), brand, desktop); identity.setAlignment(Pos.CENTER_LEFT);
+        HBox top = new HBox(identity, new Region(), refresh); HBox.setHgrow(top.getChildren().get(1), Priority.ALWAYS); top.setAlignment(Pos.CENTER_LEFT); top.getStyleClass().add("topbar");
         configureTable();
         HBox metrics = new HBox(18, productCount, lowStockCount); metrics.getStyleClass().add("metrics");
         VBox content = new VBox(22, heading("Resumen operativo", "Productos e inventario sincronizados con la API."), metrics, status, table); content.getStyleClass().add("content"); VBox.setVgrow(table, Priority.ALWAYS);
@@ -81,8 +88,8 @@ public class NexoVentasDesktopApp extends Application {
     private void loadProducts(Button refresh) {
         refresh.setDisable(true); status.setText("Actualizando datos desde la API...");
         Task<List<ApiClient.Product>> task = new Task<>() { @Override protected List<ApiClient.Product> call() throws Exception { return api.products(); } };
-        task.setOnSucceeded(e -> { List<ApiClient.Product> products = task.getValue(); table.setItems(FXCollections.observableArrayList(products)); productCount.setText(products.size() + "\nProductos registrados"); refresh.setDisable(false); status.setText("Datos sincronizados correctamente."); loadLowStock(); });
-        task.setOnFailed(e -> { refresh.setDisable(false); status.setText("No se pudieron actualizar los datos. Revisá la conexión."); }); new Thread(task, "nexoventas-products").start();
+        task.setOnSucceeded(e -> { List<ApiClient.Product> products = task.getValue(); table.setItems(FXCollections.observableArrayList(products)); productCount.setText(products.size() + "\nProductos registrados"); refresh.setDisable(false); status.setText("●  Datos sincronizados correctamente."); status.getStyleClass().setAll("status-success"); loadLowStock(); });
+        task.setOnFailed(e -> { refresh.setDisable(false); status.setText("●  No se pudieron actualizar los datos. Revisá la conexión."); status.getStyleClass().setAll("status-error"); }); new Thread(task, "nexoventas-products").start();
     }
     private void loadLowStock() { Task<List<ApiClient.Product>> task = new Task<>() { @Override protected List<ApiClient.Product> call() throws Exception { return api.lowStock(); } }; task.setOnSucceeded(e -> lowStockCount.setText(task.getValue().size() + "\nAlertas de stock")); new Thread(task, "nexoventas-low-stock").start(); }
     private Label metric(String value, String caption) { Label label = new Label(value + "\n" + caption); label.getStyleClass().add("metric"); return label; }
